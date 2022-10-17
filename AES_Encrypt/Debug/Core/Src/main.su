@@ -1,0 +1,10 @@
+../Core/Src/main.c:122:5:main	32	static
+../Core/Src/main.c:204:9:STM32_AES_CFB_Encrypt	336	static
+../Core/Src/main.c:268:9:STM32_AES_CFB_Decrypt	336	static
+../Core/Src/main.c:324:12:Buffercmp	24	static
+../Core/Src/main.c:345:6:SystemClock_Config	80	static
+../Core/Src/main.c:384:13:MX_CRC_Init	8	static
+../Core/Src/main.c:414:13:MX_USART2_UART_Init	8	static
+../Core/Src/main.c:447:13:MX_DMA_Init	16	static
+../Core/Src/main.c:465:13:MX_GPIO_Init	48	static
+../Core/Src/main.c:493:6:Error_Handler	8	static,ignoring_inline_asm

@@ -1,0 +1,519 @@
+/* USER CODE BEGIN Header */
+/**
+  ******************************************************************************
+  * @file           : main.c
+  * @brief          : Main program body
+  ******************************************************************************
+  * @attention
+  *
+  * Copyright (c) 2022 STMicroelectronics.
+  * All rights reserved.
+  *
+  * This software is licensed under terms that can be found in the LICENSE file
+  * in the root directory of this software component.
+  * If no LICENSE file comes with this software, it is provided AS-IS.
+  *
+  ******************************************************************************
+  */
+/* USER CODE END Header */
+/* Includes ------------------------------------------------------------------*/
+#include "main.h"
+#include "float.h"
+
+/* Private includes ----------------------------------------------------------*/
+/* USER CODE BEGIN Includes */
+
+/* USER CODE END Includes */
+
+/* Private typedef -----------------------------------------------------------*/
+/* USER CODE BEGIN PTD */
+typedef enum {FAILED = 0, PASSED = !FAILED} TestStatus;
+/* USER CODE END PTD */
+
+/* Private define ------------------------------------------------------------*/
+/* USER CODE BEGIN PD */
+#define PLAINTEXT_LENGTH 16
+/* USER CODE END PD */
+
+/* Private macro -------------------------------------------------------------*/
+/* USER CODE BEGIN PM */
+
+/* USER CODE END PM */
+
+/* Private variables ---------------------------------------------------------*/
+CRC_HandleTypeDef hcrc;
+
+UART_HandleTypeDef huart2;
+DMA_HandleTypeDef hdma_usart2_rx;
+DMA_HandleTypeDef hdma_usart2_tx;
+
+/* USER CODE BEGIN PV */
+char buffer[30];
+const uint8_t Plaintext[PLAINTEXT_LENGTH] =
+  {
+		  "Hey this is me"
+  };
+
+/* Key to be used for AES encryption/decryption */
+uint8_t Key[CRL_AES128_KEY] =
+  {
+    0x2b, 0x7e, 0x15, 0x16, 0x28, 0xae, 0xd2, 0xa6,
+    0xab, 0xf7, 0x15, 0x88, 0x09, 0xcf, 0x4f, 0x3c
+  };
+
+/* Initialization Vector, used only in non-ECB modes */
+uint8_t IV[CRL_AES_BLOCK] =
+  {
+      0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07,
+      0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f
+  };
+
+uint8_t cipher[PLAINTEXT_LENGTH];
+
+/* Buffer to store the output data */
+uint8_t OutputMessage[PLAINTEXT_LENGTH];
+
+/* Size of the output data */
+uint32_t OutputMessageLength = 0;
+
+static GPIO_InitTypeDef  GPIO_InitStruct;
+
+
+/* USER CODE END PV */
+
+/* Private function prototypes -----------------------------------------------*/
+void SystemClock_Config(void);
+static void MX_GPIO_Init(void);
+static void MX_DMA_Init(void);
+static void MX_USART2_UART_Init(void);
+static void MX_CRC_Init(void);
+/* USER CODE BEGIN PFP */
+int32_t STM32_AES_CFB_Encrypt(uint8_t*  InputMessage,
+                        uint32_t  InputMessageLength,
+                        uint8_t  *AES128_Key,
+                        uint8_t  *InitializationVector,
+                        uint32_t  IvLength,
+                        uint8_t  *OutputMessage,
+                        uint32_t *OutputMessageLength);
+
+int32_t STM32_AES_CFB_Decrypt(uint8_t*  InputMessage,
+                        uint32_t  InputMessageLength,
+                        uint8_t  *AES128_Key,
+                        uint8_t  *InitializationVector,
+                        uint32_t  IvLength,
+                        uint8_t  *OutputMessage,
+                        uint32_t *OutputMessageLength);
+
+TestStatus Buffercmp(const uint8_t* pBuffer,
+                     uint8_t* pBuffer1,
+                     uint16_t BufferLength);
+
+/* USER CODE END PFP */
+
+/* Private user code ---------------------------------------------------------*/
+/* USER CODE BEGIN 0 */
+
+/* USER CODE END 0 */
+
+/**
+  * @brief  The application entry point.
+  * @retval int
+  */
+int main(void)
+{
+  /* USER CODE BEGIN 1 */
+
+  /* USER CODE END 1 */
+
+  /* MCU Configuration--------------------------------------------------------*/
+
+  /* Reset of all peripherals, Initializes the Flash interface and the Systick. */
+  HAL_Init();
+
+  /* USER CODE BEGIN Init */
+
+  /* USER CODE END Init */
+
+  /* Configure the system clock */
+  SystemClock_Config();
+
+  /* USER CODE BEGIN SysInit */
+
+  /* USER CODE END SysInit */
+
+  /* Initialize all configured peripherals */
+  MX_GPIO_Init();
+  MX_DMA_Init();
+  MX_USART2_UART_Init();
+  MX_CRC_Init();
+  /* USER CODE BEGIN 2 */
+  int32_t status = AES_SUCCESS;
+  __CRC_CLK_ENABLE();
+
+  //sprintf(buffer, "%s \r\n", Plaintext);
+  //HAL_UART_Transmit(&huart2, Plaintext, sizeof (Plaintext), 1000);
+  status = STM32_AES_CFB_Encrypt( (uint8_t *) Plaintext, PLAINTEXT_LENGTH, Key, IV, sizeof(IV), cipher,
+                              &OutputMessageLength);
+  if(status == AES_SUCCESS)
+  {
+	  sprintf(buffer, "%s \n",cipher);
+	  HAL_UART_Transmit(&huart2, buffer, sizeof (buffer), 1000);
+
+  }
+
+  /*status = STM32_AES_CFB_Decrypt( (uint8_t *) cipher , PLAINTEXT_LENGTH, Key, IV, sizeof(IV), OutputMessage,
+                              &OutputMessageLength);
+
+  if (status == AES_SUCCESS)
+  {
+
+  }
+*/
+
+
+  /* USER CODE END 2 */
+
+  /* Infinite loop */
+  /* USER CODE BEGIN WHILE */
+  while (1)
+  {
+
+	  HAL_Delay(1000);
+	  sprintf(buffer, "%s \n",cipher);
+	  HAL_UART_Transmit(&huart2, buffer, sizeof (buffer), 1000);
+
+
+    /* USER CODE END WHILE */
+  }
+  /* USER CODE END 3 */
+}
+
+/**
+  * @brief  AES CFB Encryption example.
+  * @param  InputMessage: pointer to input message to be encrypted.
+  * @param  InputMessageLength: input data message length in byte.
+  * @param  AES128_Key: pointer to the AES key to be used in the operation
+  * @param  InitializationVector: pointer to the Initialization Vector (IV)
+  * @param  IvLength: IV length in bytes.
+  * @param  OutputMessage: pointer to output parameter that will handle the encrypted message
+  * @param  OutputMessageLength: pointer to encrypted message length.
+  * @retval error status: can be AES_SUCCESS if success or one of
+  *         AES_ERR_BAD_CONTEXT, AES_ERR_BAD_PARAMETER, AES_ERR_BAD_OPERATION
+  *         if error occured.
+  */
+int32_t STM32_AES_CFB_Encrypt(uint8_t* InputMessage,
+                        uint32_t InputMessageLength,
+                        uint8_t  *AES128_Key,
+                        uint8_t  *InitializationVector,
+                        uint32_t  IvLength,
+                        uint8_t  *OutputMessage,
+                        uint32_t *OutputMessageLength)
+{
+  AESECBctx_stt AESctx;
+
+  uint32_t error_status = AES_SUCCESS;
+
+  int32_t outputLength = 0;
+
+  /* Set flag field to default value */
+  AESctx.mFlags = E_SK_DEFAULT;
+
+  /* Set key size to 16 (corresponding to AES-128) */
+  AESctx.mKeySize = 16;
+
+  /* Set iv size field to IvLength*/
+  AESctx.mIvSize = IvLength;
+
+  /* Initialize the operation, by passing the key.*/
+  error_status = AES_CFB_Encrypt_Init(&AESctx, AES128_Key, InitializationVector );
+
+  /* check for initialization errors */
+  if (error_status == AES_SUCCESS)
+  {
+    /* Encrypt Data */
+    error_status = AES_CFB_Encrypt_Append(&AESctx,
+                                          InputMessage,
+                                          InputMessageLength,
+                                          OutputMessage,
+                                          &outputLength);
+
+    if (error_status == AES_SUCCESS)
+    {
+      /* Write the number of data written*/
+      *OutputMessageLength = outputLength;
+      /* Do the Finalization */
+      error_status = AES_CFB_Encrypt_Finish(&AESctx, OutputMessage + *OutputMessageLength, &outputLength);
+      /* Add data written to the information to be returned */
+      *OutputMessageLength += outputLength;
+    }
+  }
+
+  return error_status;
+}
+
+
+/**
+  * @brief  AES CFB Decryption example.
+  * @param  InputMessage: pointer to input message to be decrypted.
+  * @param  InputMessageLength: input data message length in byte.
+  * @param  AES128_Key: pointer to the AES key to be used in the operation
+  * @param  InitializationVector: pointer to the Initialization Vector (IV)
+  * @param  IvLength: IV length in bytes.
+  * @param  OutputMessage: pointer to output parameter that will handle the decrypted message
+  * @param  OutputMessageLength: pointer to decrypted message length.
+  * @retval error status: can be AES_SUCCESS if success or one of
+  *         AES_ERR_BAD_CONTEXT, AES_ERR_BAD_PARAMETER, AES_ERR_BAD_OPERATION
+  *         if error occured.
+  */
+int32_t STM32_AES_CFB_Decrypt(uint8_t* InputMessage,
+                        uint32_t InputMessageLength,
+                        uint8_t  *AES128_Key,
+                        uint8_t  *InitializationVector,
+                        uint32_t  IvLength,
+                        uint8_t  *OutputMessage,
+                        uint32_t *OutputMessageLength)
+{
+  AESECBctx_stt AESctx;
+
+  uint32_t error_status = AES_SUCCESS;
+
+  int32_t outputLength = 0;
+
+  /* Set flag field to default value */
+  AESctx.mFlags = E_SK_DEFAULT;
+
+  /* Set key size to 16 (corresponding to AES-128) */
+  AESctx.mKeySize = 16;
+
+  /* Set iv size field to IvLength*/
+  AESctx.mIvSize = IvLength;
+
+  /* Initialize the operation, by passing the key. */
+  error_status = AES_CFB_Decrypt_Init(&AESctx, AES128_Key, InitializationVector );
+
+  /* check for initialization errors */
+  if (error_status == AES_SUCCESS)
+  {
+    /* Decrypt Data */
+    error_status = AES_CFB_Decrypt_Append(&AESctx,
+                                          InputMessage,
+                                          InputMessageLength,
+                                          OutputMessage,
+                                          &outputLength);
+    if (error_status == AES_SUCCESS)
+    {
+      /* Write the number of data written*/
+      *OutputMessageLength = outputLength;
+      /* Do the Finalization */
+      error_status = AES_CFB_Decrypt_Finish(&AESctx, OutputMessage + *OutputMessageLength, &outputLength);
+      /* Add data written to the information to be returned */
+      *OutputMessageLength += outputLength;
+    }
+  }
+
+  return error_status;
+}
+
+/**
+  * @brief  Compares two buffers.
+  * @param  pBuffer, pBuffer1: buffers to be compared.
+  * @param  BufferLength: buffer's length
+  * @retval PASSED: pBuffer identical to pBuffer1
+  *         FAILED: pBuffer differs from pBuffer1
+  */
+TestStatus Buffercmp(const uint8_t* pBuffer, uint8_t* pBuffer1, uint16_t BufferLength)
+{
+  while (BufferLength--)
+  {
+    if (*pBuffer != *pBuffer1)
+    {
+      return FAILED;
+    }
+
+    pBuffer++;
+    pBuffer1++;
+  }
+
+  return PASSED;
+}
+
+
+/**
+  * @brief System Clock Configuration
+  * @retval None
+  */
+void SystemClock_Config(void)
+{
+  RCC_OscInitTypeDef RCC_OscInitStruct = {0};
+  RCC_ClkInitTypeDef RCC_ClkInitStruct = {0};
+
+  /** Initializes the RCC Oscillators according to the specified parameters
+  * in the RCC_OscInitTypeDef structure.
+  */
+  RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSI;
+  RCC_OscInitStruct.HSIState = RCC_HSI_ON;
+  RCC_OscInitStruct.HSICalibrationValue = RCC_HSICALIBRATION_DEFAULT;
+  RCC_OscInitStruct.PLL.PLLState = RCC_PLL_ON;
+  RCC_OscInitStruct.PLL.PLLSource = RCC_PLLSOURCE_HSI;
+  RCC_OscInitStruct.PLL.PLLMUL = RCC_PLL_MUL12;
+  RCC_OscInitStruct.PLL.PREDIV = RCC_PREDIV_DIV1;
+  if (HAL_RCC_OscConfig(&RCC_OscInitStruct) != HAL_OK)
+  {
+    Error_Handler();
+  }
+
+  /** Initializes the CPU, AHB and APB buses clocks
+  */
+  RCC_ClkInitStruct.ClockType = RCC_CLOCKTYPE_HCLK|RCC_CLOCKTYPE_SYSCLK
+                              |RCC_CLOCKTYPE_PCLK1;
+  RCC_ClkInitStruct.SYSCLKSource = RCC_SYSCLKSOURCE_PLLCLK;
+  RCC_ClkInitStruct.AHBCLKDivider = RCC_SYSCLK_DIV1;
+  RCC_ClkInitStruct.APB1CLKDivider = RCC_HCLK_DIV1;
+
+  if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_1) != HAL_OK)
+  {
+    Error_Handler();
+  }
+}
+
+/**
+  * @brief CRC Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_CRC_Init(void)
+{
+
+  /* USER CODE BEGIN CRC_Init 0 */
+
+  /* USER CODE END CRC_Init 0 */
+
+  /* USER CODE BEGIN CRC_Init 1 */
+
+  /* USER CODE END CRC_Init 1 */
+  hcrc.Instance = CRC;
+  hcrc.Init.DefaultInitValueUse = DEFAULT_INIT_VALUE_ENABLE;
+  hcrc.Init.InputDataInversionMode = CRC_INPUTDATA_INVERSION_NONE;
+  hcrc.Init.OutputDataInversionMode = CRC_OUTPUTDATA_INVERSION_DISABLE;
+  hcrc.InputDataFormat = CRC_INPUTDATA_FORMAT_BYTES;
+  if (HAL_CRC_Init(&hcrc) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN CRC_Init 2 */
+
+  /* USER CODE END CRC_Init 2 */
+
+}
+
+/**
+  * @brief USART2 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_USART2_UART_Init(void)
+{
+
+  /* USER CODE BEGIN USART2_Init 0 */
+
+  /* USER CODE END USART2_Init 0 */
+
+  /* USER CODE BEGIN USART2_Init 1 */
+
+  /* USER CODE END USART2_Init 1 */
+  huart2.Instance = USART2;
+  huart2.Init.BaudRate = 9600;
+  huart2.Init.WordLength = UART_WORDLENGTH_8B;
+  huart2.Init.StopBits = UART_STOPBITS_1;
+  huart2.Init.Parity = UART_PARITY_NONE;
+  huart2.Init.Mode = UART_MODE_TX_RX;
+  huart2.Init.HwFlowCtl = UART_HWCONTROL_NONE;
+  huart2.Init.OverSampling = UART_OVERSAMPLING_16;
+  huart2.Init.OneBitSampling = UART_ONE_BIT_SAMPLE_DISABLE;
+  huart2.AdvancedInit.AdvFeatureInit = UART_ADVFEATURE_NO_INIT;
+  if (HAL_UART_Init(&huart2) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN USART2_Init 2 */
+
+  /* USER CODE END USART2_Init 2 */
+
+}
+
+/**
+  * Enable DMA controller clock
+  */
+static void MX_DMA_Init(void)
+{
+
+  /* DMA controller clock enable */
+  __HAL_RCC_DMA1_CLK_ENABLE();
+
+  /* DMA interrupt init */
+  /* DMA1_Channel4_5_IRQn interrupt configuration */
+  HAL_NVIC_SetPriority(DMA1_Channel4_5_IRQn, 0, 0);
+  HAL_NVIC_EnableIRQ(DMA1_Channel4_5_IRQn);
+
+}
+
+/**
+  * @brief GPIO Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_GPIO_Init(void)
+{
+  GPIO_InitTypeDef GPIO_InitStruct = {0};
+
+  /* GPIO Ports Clock Enable */
+  __HAL_RCC_GPIOA_CLK_ENABLE();
+  __HAL_RCC_GPIOC_CLK_ENABLE();
+
+  /*Configure GPIO pin Output Level */
+  HAL_GPIO_WritePin(GPIOC, GPIO_PIN_8, GPIO_PIN_RESET);
+
+  /*Configure GPIO pin : PC8 */
+  GPIO_InitStruct.Pin = GPIO_PIN_8;
+  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+  HAL_GPIO_Init(GPIOC, &GPIO_InitStruct);
+
+}
+
+/* USER CODE BEGIN 4 */
+
+/* USER CODE END 4 */
+
+/**
+  * @brief  This function is executed in case of error occurrence.
+  * @retval None
+  */
+void Error_Handler(void)
+{
+  /* USER CODE BEGIN Error_Handler_Debug */
+  /* User can add his own implementation to report the HAL error return state */
+  __disable_irq();
+  while (1)
+  {
+  }
+  /* USER CODE END Error_Handler_Debug */
+}
+
+#ifdef  USE_FULL_ASSERT
+/**
+  * @brief  Reports the name of the source file and the source line number
+  *         where the assert_param error has occurred.
+  * @param  file: pointer to the source file name
+  * @param  line: assert_param error line source number
+  * @retval None
+  */
+void assert_failed(uint8_t *file, uint32_t line)
+{
+  /* USER CODE BEGIN 6 */
+  /* User can add his own implementation to report the file name and line number,
+     ex: printf("Wrong parameters value: file %s on line %d\r\n", file, line) */
+  /* USER CODE END 6 */
+}
+#endif /* USE_FULL_ASSERT */
